@@ -126,13 +126,27 @@ def run_dig(target: str) -> str:
 
 
 def run_nikto(target: str) -> str:
-    """
-    nikto -h — web server vulnerability scanner
-    Checks for outdated software, dangerous files, misconfigurations
-    WARNING: noisy tool, only run with permission
-    """
     print(f"  [*] nikto -h {target}  (this may take a while...)")
     return run_tool(["nikto", "-h", target, "-nointeractive"], timeout=300)
+
+
+def run_searchsploit(query: str) -> str:
+    """
+    searchsploit — look up exploits in Exploit-DB offline.
+    Usage: run_searchsploit("apache 2.4.49")
+    """
+    print(f"  [*] searchsploit {query}")
+    parts = query.strip().split()
+    return run_tool(["searchsploit"] + parts, timeout=30)
+
+
+def run_msf_command(msf_cmd: str) -> str:
+    """
+    Run a single Metasploit command non-interactively via msfconsole -q -x.
+    Example: run_msf_command("use exploit/multi/handler; set LHOST 0.0.0.0; run")
+    """
+    print(f"  [*] msfconsole -q -x '{msf_cmd}'")
+    return run_tool(["msfconsole", "-q", "-x", msf_cmd + "; exit"], timeout=120)
 
 
 # ─────────────────────────────────────────────
@@ -192,17 +206,32 @@ def format_recon_for_llm(results: dict) -> str:
 
 def run_tool_by_command(command_str: str) -> str:
     """
-    Called by LLM tool dispatch when AI writes [TOOL: nmap -sV 1.2.3.4].
-    Splits the string and runs it safely.
+    Called by LLM tool dispatch when AI writes [TOOL: <cmd>].
+    Dispatches to smart wrappers when recognized, else runs safely as subprocess.
     """
     parts = command_str.strip().split()
     if not parts:
         return "[!] Empty command."
 
+    cmd = parts[0].lower()
+
+    # Smart dispatch for known offensive tools
+    if cmd == "searchsploit":
+        return run_searchsploit(" ".join(parts[1:]))
+
+    if cmd == "msfconsole":
+        # Extract -x argument value
+        if "-x" in parts:
+            idx = parts.index("-x")
+            msf_cmd = " ".join(parts[idx+1:]).strip("'\"")
+        else:
+            msf_cmd = " ".join(parts[1:])
+        return run_msf_command(msf_cmd)
+
     # safety check — block destructive commands
     blocked = ["rm", "dd", "mkfs", "shutdown", "reboot", "wget", "curl -o", "chmod"]
-    if parts[0] in blocked:
-        return f"[!] Blocked command: {parts[0]}"
+    if cmd in blocked:
+        return f"[!] Blocked command: {cmd}"
 
     return run_tool(parts)
 

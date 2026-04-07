@@ -341,29 +341,32 @@ def analyse_target(target: str, raw_scan: str) -> dict:
       - raw_scan        : original scan dump
     """
 
-    # ── Step 1: initial prompt ──────────────────
-    initial_prompt = f"""{SYSTEM_PROMPT}
-
-TARGET: {target}
-
-RECON DATA:
+    # ── Step 1: build initial prompt (compact) ───
+    initial_prompt = f"""TARGET: {target}
+SCAN:
 {raw_scan}
+Suggest next best attack commands (Phase 1)."""
 
-Analyze this target completely. Use [TOOL:] or [SEARCH:] if you need more information.
-List all vulnerabilities, fixes, and suggest exploits where applicable.
-"""
-
-    full_conversation = initial_prompt
-    final_response    = ""
+    # session_memory stores compressed history to avoid token blowup
+    session_memory = []  # list of dicts: {"cmd": str, "result_summary": str}
+    final_response = ""
 
     # ── Step 2: tool dispatch loop ──────────────
     for loop in range(MAX_TOOL_LOOPS):
-        response = ask_deepseek(full_conversation)
+        # Build compact prompt from system prompt + compressed memory + current ask
+        memory_block = ""
+        if session_memory:
+            memory_block = "\nPREVIOUS STEPS:\n"
+            for step in session_memory:
+                memory_block += f"  CMD: {step['cmd']}\n  RES: {step['result_summary']}\n"
+
+        current_prompt = f"{SYSTEM_PROMPT}\nTARGET: {target}\n{memory_block}\n{initial_prompt if loop == 0 else 'Continue attack.'}"
+
+        response = ask_deepseek(current_prompt)
 
         print(f"\n{'─'*60}")
-        print(f"[METATRON - Round {loop + 1}]")
+        print(f"\033[91m[NORA — Round {loop + 1}]\033[0m")
         print(f"{'─'*60}")
-        print(response)
 
         final_response = response
 
@@ -377,31 +380,36 @@ List all vulnerabilities, fixes, and suggest exploits where applicable.
         for idx, (call_type, call_content) in enumerate(tool_calls):
             print(f"  [{idx+1}] {call_type}: {call_content}")
         print(f"  [s] Stop / Generate DB Report")
-        
+
         choice = timed_input(f"\nSelect option (1-{len(tool_calls)}) [Auto-executing '1' in 10s]: ", 10)
-        
+
         selected_calls = []
         if choice.lower() == 's':
             print("\n[*] Interrupted. Forcing NORA to generate report...")
-            full_conversation += "\n[AI_REQ]\nSkip further execution. Output exactly the structured DB report (VULN, EXPLOIT, RISK_LEVEL, SUMMARY)."
-            continue
+            force_prompt = f"{SYSTEM_PROMPT}\nTARGET: {target}\n{memory_block}\nSkip further execution. Output full Phase 2 structured DB report now."
+            final_response = ask_deepseek(force_prompt)
+            break
         elif choice.isdigit() and 1 <= int(choice) <= len(tool_calls):
             selected_calls = [tool_calls[int(choice)-1]]
             print(f"\n[*] Executing Plan {choice}...")
         else:
             selected_calls = [tool_calls[0]]
-            print(f"\n[*] Timeout or invalid input. Auto-executing Plan 1...")
+            print(f"\n[*] Timeout. Auto-executing Plan 1...")
 
-        # run ONLY selected calls
+        # run selected call and compress result into session_memory
         tool_results = run_tool_calls(selected_calls)
+        for call_type, call_content in selected_calls:
+            # Truncate tool output to 800 chars max to save input tokens
+            truncated = tool_results.strip()[:800]
+            if len(tool_results.strip()) > 800:
+                truncated += "\n[...truncated]"
+            session_memory.append({
+                "cmd": f"{call_type}: {call_content}",
+                "result_summary": truncated
+            })
 
-        # feed results back into conversation, minimizing token waste
-        full_conversation = (
-            f"{full_conversation}\n\n"
-            f"[AI_REQ]\n{response}\n"
-            f"[SYS_RES]\n{tool_results}\n"
-            f"Continue analysis. End with RISK_LEVEL and SUMMARY."
-        )
+        # Update initial_prompt so next loop knows the full context via memory
+        initial_prompt = ""
 
     # ── Step 3: parse structured output ─────────
     vulnerabilities = parse_vulnerabilities(final_response)
