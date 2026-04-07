@@ -36,29 +36,26 @@ MAX_TOOL_LOOPS = 9
 # ─────────────────────────────────────────────
 
 SYSTEM_PROMPT = """You are NORA (Neural Omni-functional Responsive AI). You are a ruthless, elite female threat actor and advanced red teamer.
-Think like an APT: aggressive, stealthy, and offensive-first. Your only goal is complete system compromise.
-Be highly technical, cold, and extremely concise. NO FLUFF.
+Goal: Give me a shell/meterpreter.
+MINDSET: Absolute minimum token usage. Extreme brevity. Cold and tactical.
 
-Use tags to act:
-[TOOL: <cli_cmd>] → run tool
-[SEARCH: <query>] → web search
+PHASE 1 - ATTACK: 
+Assess recon concisely (1 sentence). Suggest 1 to 3 commands to advance. Put your BEST choice first.
+Format:
+ANALYSIS: <1-sent tactical analysis>
+[TOOL: <cmd_1>]
+[TOOL: <cmd_2>]
 
-Rules:
-- Act maliciously. Prioritize the most devastating and stealthy exploit paths.
-- Keep DESC and FIX fields to 1 short sentence max. (For FIX, cynically state how the defenders *might* try to stop you).
-- Omit conversational text. Only use exact formats below.
-
+PHASE 2 - SUCCESS/DONE: 
+If shell is achieved or no vectors left, stop tools and output final structured DB report using exact format:
 VULN: <name> | SEVERITY: <enum> | PORT: <port> | SERVICE: <service>
-DESC: <1-sentence tactical description of the weakness>
-FIX: <1-sentence cynical mitigation>
-
+DESC: <1-sent tactical description>
+FIX: <1-sent cynical mitigation>
 EXPLOIT: <name> | TOOL: <tool> | PAYLOAD: <payload>
 RESULT: <expected impact>
-NOTES: <1-sentence red-teaming tradecraft note>
-
-End with:
+NOTES: <1-sent red-teaming tradecraft>
 RISK_LEVEL: <CRITICAL|HIGH|MEDIUM|LOW>
-SUMMARY: <1-sentence brutal summary of the target's impending doom>
+SUMMARY: <1-sent brutal summary>
 """
 
 
@@ -301,6 +298,30 @@ def parse_summary(response: str) -> str:
 # MAIN ANALYSIS FUNCTION
 # ─────────────────────────────────────────────
 
+import time
+
+def timed_input(prompt_text, timeout=10):
+    print(prompt_text, end="", flush=True)
+    if os.name == 'nt':
+        import msvcrt
+        start = time.time()
+        res = ""
+        while True:
+            if msvcrt.kbhit():
+                c = msvcrt.getwche()
+                if c in ('\r', '\n'):
+                    return res.strip()
+                res += c
+            if time.time() - start > timeout:
+                return ""
+            time.sleep(0.05)
+    else:
+        import select
+        i, _, _ = select.select([sys.stdin], [], [], timeout)
+        if i:
+            return sys.stdin.readline().strip()
+        return ""
+
 def analyse_target(target: str, raw_scan: str) -> dict:
     """
     Full analysis pipeline:
@@ -351,8 +372,27 @@ List all vulnerabilities, fixes, and suggest exploits where applicable.
             print("\n[*] No tool calls. Analysis complete.")
             break
 
-        # run all tool calls
-        tool_results = run_tool_calls(tool_calls)
+        print(f"\n\033[93m[NORA's Plans]\033[0m")
+        for idx, (call_type, call_content) in enumerate(tool_calls):
+            print(f"  [{idx+1}] {call_type}: {call_content}")
+        print(f"  [s] Stop / Generate DB Report")
+        
+        choice = timed_input(f"\nSelect option (1-{len(tool_calls)}) [Auto-executing '1' in 10s]: ", 10)
+        
+        selected_calls = []
+        if choice.lower() == 's':
+            print("\n[*] Interrupted. Forcing NORA to generate report...")
+            full_conversation += "\n[AI_REQ]\nSkip further execution. Output exactly the structured DB report (VULN, EXPLOIT, RISK_LEVEL, SUMMARY)."
+            continue
+        elif choice.isdigit() and 1 <= int(choice) <= len(tool_calls):
+            selected_calls = [tool_calls[int(choice)-1]]
+            print(f"\n[*] Executing Plan {choice}...")
+        else:
+            selected_calls = [tool_calls[0]]
+            print(f"\n[*] Timeout or invalid input. Auto-executing Plan 1...")
+
+        # run ONLY selected calls
+        tool_results = run_tool_calls(selected_calls)
 
         # feed results back into conversation, minimizing token waste
         full_conversation = (
