@@ -12,6 +12,7 @@ from tools import run_tool_by_command, run_nmap, run_curl_headers
 from search import handle_search_dispatch
 
 import os
+import sys
 
 def load_env():
     """Charge les données du fichier .env"""
