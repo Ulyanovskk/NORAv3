@@ -1,7 +1,7 @@
-# METATRON
+# NORA
 AI-powered penetration testing assistant using DeepSeek API on linux (Parrot OS)
-# 🔱 METATRON
-### AI-Powered Penetration Testing Assistant
+# 🔱 NORA
+### Neural Omni-functional Responsive AI
 
 <p align="center">
   <img src="screenshots/banner.png" alt="Metatron Banner" width="800"/>
