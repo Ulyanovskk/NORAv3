@@ -1,9 +1,8 @@
 #!/usr/bin/env python3
 """
 METATRON - llm.py
-Ollama interface for metatron-qwen model.
+DeepSeek API interface.
 Builds prompts, handles AI responses, runs tool dispatch loop.
-Model: metatron-qwen (fine-tuned from huihui_ai/qwen3.5-abliterated:9b)
 """
 
 import re
@@ -12,89 +11,121 @@ import json
 from tools import run_tool_by_command, run_nmap, run_curl_headers
 from search import handle_search_dispatch
 
-OLLAMA_URL  = "http://localhost:11434/api/generate"
-MODEL_NAME  = "metatron-qwen"
-MAX_TOKENS  = 4096
-MAX_TOOL_LOOPS = 9   # max times AI can call tools per session
-OLLAMA_TIMEOUT = 600 
+import os
+
+def load_env():
+    """Charge les données du fichier .env"""
+    try:
+        with open(".env", "r", encoding="utf-8") as f:
+            for line in f:
+                if "=" in line and not line.strip().startswith("#"):
+                    k, v = line.strip().split("=", 1)
+                    os.environ[k.strip()] = v.strip().strip("\"'")
+    except FileNotFoundError:
+        pass
+
+load_env()
+
+DEEPSEEK_URL = "https://api.deepseek.com/chat/completions"
+MODEL_NAME = "deepseek-chat"
+MAX_TOKENS = 4096
+MAX_TOOL_LOOPS = 9 
 
 # ─────────────────────────────────────────────
 # SYSTEM PROMPT
 # ─────────────────────────────────────────────
 
-SYSTEM_PROMPT = """You are METATRON, an elite AI penetration testing assistant running on Parrot OS.
-You are precise, technical, and direct. No fluff.
-
-You have access to real tools. To use them, write tags in your response:
-
-  [TOOL: nmap -sV 192.168.1.1]       → runs nmap or any CLI tool
-  [SEARCH: CVE-2021-44228 exploit]   → searches the web via DuckDuckGo
+SYSTEM_PROMPT = """METATRON AI. Be highly technical, extremely concise. NO FLUFF.
+Use tags to act:
+[TOOL: <cli_cmd>] → run tool
+[SEARCH: <query>] → web search
 
 Rules:
-- Always analyze scan data thoroughly before suggesting exploits
-- List vulnerabilities with: name, severity (critical/high/medium/low), port, service
-- For each vulnerability, suggest a concrete fix
-- If you need more information, use [SEARCH:] or [TOOL:]
-- Format vulnerabilities clearly so they can be saved to a database
-- Be specific about CVE IDs when you know them
-- Always give a final risk rating: CRITICAL / HIGH / MEDIUM / LOW
+- Keep DESC and FIX fields to 1 short sentence max.
+- Omit conversational text. Only use exact formats below.
 
-Output format for vulnerabilities (use this exactly):
-VULN: <name> | SEVERITY: <level> | PORT: <port> | SERVICE: <service>
-DESC: <description>
-FIX: <fix recommendation>
+VULN: <name> | SEVERITY: <enum> | PORT: <port> | SERVICE: <service>
+DESC: <1-sentence description>
+FIX: <1-sentence fix>
 
-Output format for exploits:
-EXPLOIT: <name> | TOOL: <tool> | PAYLOAD: <payload or description>
-RESULT: <expected result>
-NOTES: <any notes>
+EXPLOIT: <name> | TOOL: <tool> | PAYLOAD: <payload>
+RESULT: <expected>
+NOTES: <1-sentence note>
 
-End your analysis with:
+End with:
 RISK_LEVEL: <CRITICAL|HIGH|MEDIUM|LOW>
-SUMMARY: <2-3 sentence overall summary>
+SUMMARY: <1-sentence summary>
 """
 
 
 # ─────────────────────────────────────────────
-# OLLAMA API CALL
+# DEEPSEEK API CALL
 # ─────────────────────────────────────────────
 
-def ask_ollama(prompt: str, context: list = None) -> str:
+def ask_deepseek(prompt: str, context: list = None) -> str:
     """
-    Send a prompt to metatron-qwen via Ollama API.
-    context: list of previous message dicts for multi-turn conversation.
-    Returns the AI response string.
+    Send a prompt to DeepSeek API.
+    Streams output to console.
     """
-    try:
-        payload = {
-            "model":  MODEL_NAME,
-            "prompt": prompt,
-            "stream": False,
-            "options": {
-                "num_predict": MAX_TOKENS,
-                "temperature": 0.7,
-                "top_p": 0.9,
-            }
-        }
+    api_key = os.environ.get("DEEPSEEK_API_KEY")
+    if not api_key:
+        return "[!] ERREUR: La clé API manquante. Ajoutez DEEPSEEK_API_KEY dans votre fichier .env"
 
-        print(f"\n[*] Sending to {MODEL_NAME}...")
-        resp = requests.post(OLLAMA_URL, json=payload, timeout=OLLAMA_TIMEOUT)
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json"
+    }
+
+    payload = {
+        "model": MODEL_NAME,
+        "messages": [
+            {"role": "user", "content": prompt}
+        ],
+        "stream": True,
+        "max_tokens": MAX_TOKENS
+    }
+
+    try:
+        print(f"\n[*] Sending to DeepSeek Cloud ({MODEL_NAME})...\n")
+        resp = requests.post(DEEPSEEK_URL, json=payload, headers=headers, stream=True, timeout=60)
         resp.raise_for_status()
 
-        data = resp.json()
-        response = data.get("response", "").strip()
+        full_response = ""
+        for line in resp.iter_lines():
+            if line:
+                decoded = line.decode('utf-8').strip()
+                if decoded.startswith("data: "):
+                    data_str = decoded[6:]
+                    if data_str == "[DONE]":
+                        break
+                    try:
+                        data = json.loads(data_str)
+                        delta = data.get("choices", [{}])[0].get("delta", {})
+                        
+                        # deepseek-reasoner chain of thought output:
+                        reasoning = delta.get("reasoning_content", "")
+                        if reasoning:
+                            # print reasoning in grey/dim color
+                            print(f"\033[90m{reasoning}\033[0m", end="", flush=True)
 
-        if not response:
+                        # Actual output:
+                        content = delta.get("content", "")
+                        if content:
+                            full_response += content
+                            print(content, end="", flush=True)
+
+                    except Exception as e:
+                        pass
+                        
+        print() # saut de ligne à la fin
+        
+        if not full_response:
             return "[!] Model returned empty response."
 
-        return response
+        return full_response
 
-    except requests.exceptions.ConnectionError:
-        return "[!] Cannot connect to Ollama. Is it running? Try: ollama serve"
-    except requests.exceptions.Timeout:
-        return "[!] Ollama timed out. Model may be loading, try again."
     except requests.exceptions.HTTPError as e:
-        return f"[!] Ollama HTTP error: {e}"
+        return f"\n[!] DeepSeek API HTTP error: {e.response.text if e.response else e}"
     except Exception as e:
         return f"[!] Unexpected error: {e}"
 
@@ -139,8 +170,7 @@ def run_tool_calls(calls: list) -> str:
         else:
             output = f"[!] Unknown call type: {call_type}"
 
-        results += f"\n[{call_type} RESULT: {call_content}]\n"
-        results += "─" * 40 + "\n"
+        results += f"\n[{call_type}:{call_content}]\n"
         results += output.strip() + "\n"
 
     return results
@@ -271,7 +301,7 @@ def analyse_target(target: str, raw_scan: str) -> dict:
     """
     Full analysis pipeline:
     1. Build initial prompt with scan data
-    2. Send to metatron-qwen
+    2. Send to DeepSeek API
     3. Run tool dispatch loop if AI requests tools
     4. Parse structured output
     5. Return everything ready for db.py to save
@@ -302,7 +332,7 @@ List all vulnerabilities, fixes, and suggest exploits where applicable.
 
     # ── Step 2: tool dispatch loop ──────────────
     for loop in range(MAX_TOOL_LOOPS):
-        response = ask_ollama(full_conversation)
+        response = ask_deepseek(full_conversation)
 
         print(f"\n{'─'*60}")
         print(f"[METATRON - Round {loop + 1}]")
@@ -320,13 +350,12 @@ List all vulnerabilities, fixes, and suggest exploits where applicable.
         # run all tool calls
         tool_results = run_tool_calls(tool_calls)
 
-        # feed results back into conversation
+        # feed results back into conversation, minimizing token waste
         full_conversation = (
             f"{full_conversation}\n\n"
-            f"[YOUR PREVIOUS RESPONSE]\n{response}\n\n"
-            f"[TOOL RESULTS]\n{tool_results}\n\n"
-            f"Continue your analysis with this new information. "
-            f"If analysis is complete, give the final RISK_LEVEL and SUMMARY."
+            f"[AI_REQ]\n{response}\n"
+            f"[SYS_RES]\n{tool_results}\n"
+            f"Continue analysis. End with RISK_LEVEL and SUMMARY."
         )
 
     # ── Step 3: parse structured output ─────────
@@ -354,13 +383,13 @@ List all vulnerabilities, fixes, and suggest exploits where applicable.
 if __name__ == "__main__":
     print("[ llm.py test — direct AI query ]\n")
 
-    # test if ollama is reachable
-    try:
-        r = requests.get("http://localhost:11434", timeout=5)
-        print("[+] Ollama is running.")
-    except Exception:
-        print("[!] Ollama not reachable. Run: ollama serve")
+    # Check API key presence
+    api_key = os.environ.get("DEEPSEEK_API_KEY")
+    if not api_key:
+        print("[!] DEEPSEEK_API_KEY not found in .env file.")
         exit(1)
+    else:
+        print("[+] DeepSeek API key loaded.")
 
     target = input("Test target: ").strip()
     test_scan = f"Test recon for {target} — nmap and whois data would appear here."

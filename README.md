@@ -1,5 +1,5 @@
 # METATRON
-AI-powered penetration testing assistant using local LLM on linux (Parrot OS)
+AI-powered penetration testing assistant using DeepSeek API on linux (Parrot OS)
 # 🔱 METATRON
 ### AI-Powered Penetration Testing Assistant
 
@@ -10,7 +10,7 @@ AI-powered penetration testing assistant using local LLM on linux (Parrot OS)
 <p align="center">
   <img src="https://img.shields.io/badge/Python-3.x-blue?style=for-the-badge&logo=python"/>
   <img src="https://img.shields.io/badge/OS-Parrot%20Linux-green?style=for-the-badge&logo=linux"/>
-  <img src="https://img.shields.io/badge/AI-metatron--qwen-red?style=for-the-badge"/>
+  <img src="https://img.shields.io/badge/AI-DeepSeek-red?style=for-the-badge"/>
   <img src="https://img.shields.io/badge/DB-MariaDB-orange?style=for-the-badge&logo=mariadb"/>
   <img src="https://img.shields.io/badge/License-MIT-yellow?style=for-the-badge"/>
 </p>
@@ -19,21 +19,21 @@ AI-powered penetration testing assistant using local LLM on linux (Parrot OS)
 
 ## 📌 What is Metatron?
 
-**Metatron** is a CLI-based AI penetration testing assistant that runs entirely on your local machine — no cloud, no API keys, no subscriptions.
+**Metatron** is a CLI-based AI penetration testing assistant that interfaces with the DeepSeek API to perform powerful vulnerability analysis.
 
-You give it a target IP or domain. It runs real recon tools (nmap, whois, whatweb, curl, dig, nikto), feeds all results to a locally running AI model, and the AI analyzes the target, identifies vulnerabilities, suggests exploits, and recommends fixes. Everything gets saved to a MariaDB database with full scan history.
+You give it a target IP or domain. It runs real recon tools (nmap, whois, whatweb, curl, dig, nikto), feeds all results to the DeepSeek reasoning model via API, and the AI analyzes the target, identifies vulnerabilities, suggests exploits, and recommends fixes. Everything gets saved to a MariaDB database with full scan history.
 
 ---
 
 ## ✨ Features
 
-- 🤖 **Local AI Analysis** — powered by `metatron-qwen` via Ollama, runs 100% offline
+- 🤖 **DeepSeek API Analysis** — highly advanced reasoning powered by DeepSeek API
 - 🔍 **Automated Recon** — nmap, whois, whatweb, curl headers, dig DNS, nikto
 - 🌐 **Web Search** — DuckDuckGo search + CVE lookup (no API key needed)
 - 🗄️ **MariaDB Backend** — full scan history with 5 linked tables
 - ✏️ **Edit / Delete** — modify any saved result directly from the CLI
 - 🔁 **Agentic Loop** — AI can request more tool runs mid-analysis
-- 🚫 **No API Keys** — everything is free and local
+- 🔑 **Secure API Key Management** — expects a .env file to store the DEEPSEEK_API_KEY
 -📤 Export Reports
 
 Metatron allows you to export scan results into clean, shareable report formats by selecting '2.view history'->select slno and export
@@ -56,7 +56,7 @@ Metatron allows you to export scan results into clean, shareable report formats 
 
 <p align="center">
   <img src="screenshots/ai_analysis.png" alt="AI Analysis" width="700"/>
-  <br><i>metatron-qwen analyzing scan results</i>
+  <br><i>DeepSeek analyzing scan results</i>
 </p>
 
 <p align="center">
@@ -71,9 +71,8 @@ Metatron allows you to export scan results into clean, shareable report formats 
 | Component  | Technology                          |
 |------------|-------------------------------------|
 | Language   | Python 3                            |
-| AI Model   | metatron-qwen (fine-tuned Qwen 3.5) |
-| Base Model | huihui_ai/qwen3.5-abliterated:9b    |
-| LLM Runner | Ollama                              |
+| AI Model   | deepseek-chat                       |
+| LLM Runner | DeepSeek API                        |
 | Database   | MariaDB                             |
 | OS         | Parrot OS (Debian-based)            |
 | Search     | DuckDuckGo (free, no key)           |
@@ -110,47 +109,23 @@ sudo apt install nmap whois whatweb curl dnsutils nikto
 
 ---
 
-## 🤖 AI Model Setup
+## 🤖 API Setup
 
-### Step 1 — Install Ollama
-
-```bash
-curl -fsSL https://ollama.com/install.sh | sh
-```
-
-### Step 2 — Download the base model
+### Step 1 — Create a .env file
 
 ```bash
-ollama pull huihui_ai/qwen3.5-abliterated:9b
+touch .env
 ```
 
-> ⚠️ This model requires at least 8.4 GB of RAM. If your system has less, use the 4b variant:
-> ```bash
-> ollama pull huihui_ai/qwen3.5-abliterated:4b
-> ```
-> Then edit `Modelfile` and change the FROM line to the 4b model.
+### Step 2 — Add your DeepSeek API Key
 
-### Step 3 — Build the custom metatron-qwen model
+Open `.env` in your editor and add the following line:
 
-The repo includes a `Modelfile` that fine-tunes the base model with pentest-specific parameters:
-
-```bash
-ollama create metatron-qwen -f Modelfile
+```env
+DEEPSEEK_API_KEY=your_actual_api_key_here
 ```
 
-This creates your local `metatron-qwen` model with:
-- 16,384 token context window
-- Temperature: 0.7
-- Top-k: 10
-- Top-p: 0.9
-
-### Step 4 — Verify the model exists
-
-```bash
-ollama list
-```
-
-You should see `metatron-qwen` in the list.
+Metatron will automatically securely read the key from the `.env` file and it is ignored by git.
 
 ---
 
@@ -238,17 +213,9 @@ CREATE TABLE summary (
 
 ## 🚀 Usage
 
-Metatron needs **two terminal tabs** to run.
+Metatron needs **one terminal tab** to run.
 
-### Terminal 1 — Load the AI model
-
-```bash
-ollama run metatron-qwen
-```
-
-Wait until you see the `>>>` prompt. This means the model is loaded into memory and ready. You can leave this terminal running in the background.
-
-### Terminal 2 — Launch Metatron
+### Launch Metatron
 
 ```bash
 cd ~/METATRON
@@ -303,9 +270,8 @@ METATRON/
 ├── metatron.py       ← main CLI entry point
 ├── db.py             ← MariaDB connection and all CRUD operations
 ├── tools.py          ← recon tool runners (nmap, whois, etc.)
-├── llm.py            ← Ollama interface and AI tool dispatch loop
+├── llm.py            ← DeepSeek API interface and AI tool dispatch loop
 ├── search.py         ← DuckDuckGo web search and CVE lookup
-├── Modelfile         ← custom model config for metatron-qwen
 ├── requirements.txt  ← Python dependencies
 ├── .gitignore        ← excludes venv, pycache, db files
 ├── LICENSE           ← MIT License

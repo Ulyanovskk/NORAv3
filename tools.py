@@ -29,13 +29,16 @@ def run_tool(command: list, timeout: int = 120) -> str:
         errors = result.stderr.strip()
 
         if output and errors:
-            return output + "\n[STDERR]\n" + errors
+            res = output + "\n" + errors
         elif output:
-            return output
+            res = output
         elif errors:
-            return errors
+            res = errors
         else:
-            return "[!] Tool returned no output."
+            res = "[!] No output"
+            
+        # Compress blank lines to save tokens
+        return "\n".join(line for line in res.splitlines() if line.strip())
 
     except subprocess.TimeoutExpired:
         return f"[!] Timed out after {timeout}s: {' '.join(command)}"
@@ -182,9 +185,7 @@ def format_recon_for_llm(results: dict) -> str:
     """
     output = ""
     for tool, data in results.items():
-        output += f"\n{'='*50}\n"
-        output += f"[ {tool.upper()} OUTPUT ]\n"
-        output += f"{'='*50}\n"
+        output += f"\n[{tool.upper()}]\n"
         output += data.strip() + "\n"
     return output
 
