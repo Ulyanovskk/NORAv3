@@ -394,7 +394,7 @@ def export_menu(data: dict):
 
 
 if __name__ == "__main__":
-    print("\n\033[91m    METATRON — Standalone Report Exporter\033[0m")
+    print("\n\033[91m    NORA — Standalone Report Exporter\033[0m")
     print("\033[90m    ─────────────────────────────────────\033[0m\n")
 
     rows = fetch_all_history()
